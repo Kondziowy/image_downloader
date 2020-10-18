@@ -41,9 +41,31 @@ def get_image_urls_regex(website_text: str) -> typing.List[ParseResult]:
     :return:
     """
     uris: typing.List[ParseResult] = []
-    # Expecting a minimum of standard conformance here - quoted filenames/URIs
-    for result in re.finditer("<img.*?src=[\"'](?P<image_link>[^'\"]+)", website_text):
+    # Expecting a minimum of standard conformance here - quoted URIs as src attribute value
+    # This actually performs better than using find to find img offsets
+    for result in re.finditer("<img.*?src=[\"'](?P<image_link>[^'\"]+)", website_text, flags=re.IGNORECASE):
         uris.append(urllib.parse.urlparse(result.group("image_link")))
+    log.info("Got %d image URIs", len(uris))
+    return uris
+
+
+def get_image_urls_find(website_text: str) -> typing.List[ParseResult]:
+    """
+    Extract src links from IMG tags. Given current webdesign this is pretty naive (images can also sit in CSS
+    background images or be dynamically added via JS) but handling these would require considerably more effort
+    so just taking care of IMG tags for now.
+    This is a proof-of-concept to determine if it's worth not using regex here.
+
+    :param args:
+    :return:
+    """
+    uris: typing.List[ParseResult] = []
+    current_pos = 0
+    img_location = website_text.find("img", current_pos)
+    while img_location:
+        uris.append(img_location)
+        img_location = website_text.find("img", current_pos)
+
     log.info("Got %d image URIs", len(uris))
     return uris
 
