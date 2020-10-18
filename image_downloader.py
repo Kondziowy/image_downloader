@@ -12,8 +12,7 @@ from urllib.parse import ParseResult
 
 import requests
 import logging
-
-logging.basicConfig(format='[%(asctime)s][%(levelname)s][%(module)s.%(funcName)s] %(message)s', level=logging.DEBUG)
+logging.basicConfig(format='[%(asctime)s][%(levelname)s][%(module)s.%(funcName)s] %(message)s')
 log = logging.getLogger(__name__)
 
 FILE_WRITE_CHUNK_SIZE = 128  # chunk size in bytes for file writes
@@ -27,15 +26,17 @@ class DownloadResult:
 
 @dataclass
 class DownloadOperationResult:
+    remote_uri: str
     local_path: typing.Optional[str]
     error_occured: bool
 
 
 def get_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Download all images defined by IMG HTML tags on a given page")
     parser.add_argument("url", help="website URL", type=urllib.parse.urlparse)
     parser.add_argument("--check", help="Don't save files to disk", action='store_true')
-    parser.add_argument("--workers", help="How many workers to use", type=int, default=10)
+    parser.add_argument("--workers", help="How many workers to use (default: 1)", type=int, default=1)
+    parser.add_argument("--verbose", help="Show more logs", action='store_true')
     args = parser.parse_args()
     return args
 
@@ -88,6 +89,7 @@ def download_single_image(base_uri: str, uri: ParseResult, check=False) -> Downl
     :param check: if True, do the request but don't save to disk
     :return: operation status and path to local file
     """
+    # TODO: pass log level to thread to get logs from here too
     remote_uri = urllib.parse.urlunparse(uri)
     if not uri.scheme:
         log.debug("'%s' appears to be a relative link, prefixing it with website URL")
@@ -95,9 +97,9 @@ def download_single_image(base_uri: str, uri: ParseResult, check=False) -> Downl
     r = requests.get(remote_uri, stream=True)
     if not r.ok:
         log.error("URI %s failed to download, skipping it", remote_uri)
-        return DownloadOperationResult(local_path=None, error_occured=True)
+        return DownloadOperationResult(remote_uri=remote_uri, local_path=None, error_occured=True)
     if check:
-        return DownloadOperationResult(local_path=None, error_occured=False)
+        return DownloadOperationResult(remote_uri=remote_uri, local_path=None, error_occured=False)
     local_name = os.path.basename(uri.path)
     if not local_name or os.path.exists(local_name):
         log.debug("%s does not contain a filename or the filename already exists, using the checksum as filename")
@@ -106,7 +108,7 @@ def download_single_image(base_uri: str, uri: ParseResult, check=False) -> Downl
         log.debug("Downloading '%s' as '%s'", remote_uri, local_name)
         for chunk in r.iter_content(chunk_size=FILE_WRITE_CHUNK_SIZE):
             fd.write(chunk)
-    return DownloadOperationResult(local_path=local_name, error_occured=False)
+    return DownloadOperationResult(remote_uri=remote_uri, local_path=local_name, error_occured=False)
 
 
 def download_images(base_uri: str, image_links: typing.Set[ParseResult], check=False, pool_size=10) -> DownloadResult:
@@ -130,15 +132,23 @@ def download_images(base_uri: str, image_links: typing.Set[ParseResult], check=F
         future_to_url = {executor.submit(download_single_image, base_uri, url, check): url for url in image_links}
         for future in concurrent.futures.as_completed(future_to_url):
             downloaded_files.append(future.result())
-    log.debug("Pool completed")
+    log.debug("Pool workers completed")
+    for line in downloaded_files:
+        if line.error_occured:
+            log.error("Failed to download %s", line.remote_uri)
+        else:
+            log.debug("Downloaded %s", line.remote_uri)
     return DownloadResult(image_paths=[f.local_path for f in downloaded_files],
                           error_occured=any([f.error_occured for f in downloaded_files]))
 
 
 def main():
     args = get_arguments()
+    log.setLevel(logging.DEBUG if args.verbose else logging.INFO)
     uri = urllib.parse.urlunparse(args.url)
     log.info("Downloading images from %s using %d workers", uri, args.workers)
+    if args.check:
+        log.info("Running in check mode, files will not be saved.")
     start_time = time.time()
     data = requests.get(uri).text
     links = get_image_uris_regex(data)
