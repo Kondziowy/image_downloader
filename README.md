@@ -17,6 +17,7 @@ Tool will not recursively follow links.
 
 
 Example:
+
     image_downloader.py --workers 1 --check http://wp.pl
     [2020-10-19 01:29:30,604][INFO][image_downloader.main] Downloading images from http://wp.pl using 1 workers
     [2020-10-19 01:29:30,604][INFO][image_downloader.main] Running in check mode, files will not be saved.
